@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  api:
+    name: API (Node/Express)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: aaroh
+          POSTGRES_PASSWORD: aaroh
+          POSTGRES_DB: aaroh_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aaroh -d aaroh_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Apply migrations against a throwaway DB
+        env:
+          DATABASE_URL: postgres://aaroh:aaroh@localhost:5432/aaroh_test
+        run: npm run migrate:up
+
+  ai:
+    name: AI (Python/FastAPI)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest

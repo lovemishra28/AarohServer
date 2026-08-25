@@ -1,0 +1,56 @@
+# Aaroh Server — full local stack.
+#
+#   docker compose up --build
+#
+# Brings up three services:
+#   • db  — PostgreSQL 16 + PostGIS 3.4 (your database; no local install needed)
+#   • ai  — Python/FastAPI AI service   (http://localhost:8000/health)
+#   • api — Node/Express API gateway    (http://localhost:3000/v1/health)
+#
+# To point at a cloud database (Neon/Supabase) instead of the local `db`,
+# set the api service's DATABASE_URL to your provider's connection string.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aaroh}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aaroh}
+      POSTGRES_DB: ${POSTGRES_DB:-aaroh}
+    ports:
+      - "5432:5432"
+    volumes:
+      - aaroh_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aaroh} -d ${POSTGRES_DB:-aaroh}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ai:
+    build:
+      context: ./ai
+    environment:
+      PORT: 8000
+    ports:
+      - "8000:8000"
+
+  api:
+    build:
+      context: ./api
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      # Inside compose the DB is reachable at host `db`, not localhost.
+      DATABASE_URL: postgres://${POSTGRES_USER:-aaroh}:${POSTGRES_PASSWORD:-aaroh}@db:5432/${POSTGRES_DB:-aaroh}
+      AI_SERVICE_URL: http://ai:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      ai:
+        condition: service_started
+
+volumes:
+  aaroh_db_data:
