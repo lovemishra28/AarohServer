@@ -18,7 +18,13 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aaroh}
       POSTGRES_DB: ${POSTGRES_DB:-aaroh}
     ports:
-      - "5432:5432"
+      # Published on 5433 by default, NOT 5432. If you have PostgreSQL installed
+      # natively on your machine it already owns 5432, and Windows will silently
+      # route localhost:5432 to that one instead of this container — producing a
+      # confusing "password authentication failed" error. Inside compose the port
+      # is still 5432 (see the api service's DATABASE_URL); only the host-side
+      # port changes. Override with DB_HOST_PORT in .env if 5433 is taken too.
+      - "${DB_HOST_PORT:-5433}:5432"
     volumes:
       - aaroh_db_data:/var/lib/postgresql/data
     healthcheck:

@@ -21,7 +21,7 @@ mobile app lives in `AarohClient`.
 |---|---|---|---|
 | `api` | Node 22 + Express + TypeScript | http://localhost:3000 | The product surface. Auth, CRUD, validation, offline sync. Owns every client-facing contract. |
 | `ai` | Python 3.12 + FastAPI | http://localhost:8000 | Anything numeric: the ML crop-ranker and the deterministic agronomy engine. Private — only `api` calls it. |
-| `db` | PostgreSQL 16 + PostGIS 3.4 | `localhost:5432` | Relational **and** geospatial data in one engine. |
+| `db` | PostgreSQL 16 + PostGIS 3.4 | `localhost:5433` | Relational **and** geospatial data in one engine. |
 
 Two rules that prevent the worst class of bug in this codebase:
 
@@ -64,7 +64,7 @@ checked into `database/migrations/`.
 ```bash
 cd api
 npm install
-DATABASE_URL=postgres://aaroh:aaroh@localhost:5432/aaroh npm run migrate:up
+DATABASE_URL=postgres://aaroh:aaroh@localhost:5433/aaroh npm run migrate:up
 ```
 
 On Windows PowerShell, set the variable first:
@@ -72,11 +72,22 @@ On Windows PowerShell, set the variable first:
 ```powershell
 cd api
 npm install
-$env:DATABASE_URL = "postgres://aaroh:aaroh@localhost:5432/aaroh"
+$env:DATABASE_URL = "postgres://aaroh:aaroh@localhost:5433/aaroh"
 npm run migrate:up
 ```
 
 Create a new migration with `npm run migrate:create -- my-migration-name`.
+
+> **Why port 5433 and not 5432?** If PostgreSQL is also installed natively on your
+> machine, it already owns 5432. Windows permits *both* it and Docker's forwarder to
+> listen on that port, then routes your connection to whichever bound first — usually
+> the native install, which has no `aaroh` user. The symptom is a thoroughly misleading
+> `password authentication failed for user "aaroh"` even though the container is fine.
+> Publishing on 5433 avoids the collision. Change `DB_HOST_PORT` in `.env` if you need
+> a different one. Inside the containers the port is still 5432.
+>
+> To confirm a collision on your machine: `netstat -ano | findstr ":5432"` — two
+> `LISTENING` lines with different PIDs means two servers are competing.
 
 > Column-naming rule, enforced in review: every nutrient column carries its unit and basis —
 > `n_mgkg` / `p_mgkg` / `k_mgkg` (sensor, elemental) vs `n_kgha` / `p2o5_kgha` / `k2o_kgha`
@@ -99,8 +110,8 @@ To use a managed provider (Neon, Supabase, RDS — all support PostGIS), put its
 `.env`, set the same value on the `api` service in `docker-compose.yml`, and run the migrations
 against it. No code changes are required.
 
-Note the hostname difference: from your own machine the database is at `localhost:5432`, but from
-*inside* a container it is at `db:5432` (the compose service name).
+Note the hostname difference: from your own machine the database is at `localhost:5433`, but from
+*inside* a container it is at `db:5432` (the compose service name and its internal port).
 
 ---
 
