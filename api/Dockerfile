@@ -5,7 +5,9 @@ WORKDIR /app
 
 # Install dependencies first for better layer caching.
 COPY package.json package-lock.json* ./
-RUN npm install
+# `npm ci` not `npm install`: installs exactly what package-lock.json pins, so
+# the image is reproducible and cannot silently drift from CI or your machine.
+RUN npm ci
 
 # Copy the rest of the source.
 COPY . .

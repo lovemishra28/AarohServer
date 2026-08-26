@@ -49,9 +49,11 @@ docker compose up --build
 
 Then check that both services answer:
 
-- http://localhost:3000/v1/health → `{"status":"ok","dependencies":{"ai_service":"up"}}`
+- http://localhost:3000/v1/health → `{"status":"ok","dependencies":{"database":"up","ai_service":"up"}}`
 - http://localhost:8000/health → `{"status":"ok","model_loaded":false}`
 
+The API's `status` is `"ok"` only when **every** dependency is reachable; if the database or
+AI service is down it returns `"degraded"` (still HTTP 200 — the process itself is alive).
 `model_loaded` is `false` until a trained crop-ranker is registered (Phase 1).
 
 Stop with `Ctrl+C`; `docker compose down -v` also wipes the database volume.
@@ -121,8 +123,8 @@ Phase numbering follows `SERVER_DEVELOPMENT_GUIDE.md` §2. Each phase ends in so
 
 | Phase | What | Status |
 |---|---|---|
-| 0 | Foundations — repo, compose, CI, baseline migration | **current** |
-| 1 | AI trustworthiness — train + evaluate the crop ranker | next |
+| 0 | Foundations — repo, compose, CI, baseline migration | **done** |
+| 1 | AI trustworthiness — train + evaluate the crop ranker | **current** |
 | 2 | Backend core — full schema, auth, inference service, agronomy engine | |
 | 3 | Manual-input app flow — first end-to-end demo, no hardware | |
 | 4 | Hardware loop — BLE ingest, offline queue (needs firmware temp + GPS fixes) | |
