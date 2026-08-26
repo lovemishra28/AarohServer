@@ -1,0 +1,48 @@
+# v1 BASELINE — LightGBM multiclass softprob on the hard label.
+#
+# This is the deployable model: a softprob classifier whose probability vector
+# is read as a crop ranking. It gets an ONNX freeze and, if it clears the gates,
+# becomes the active model the serving layer loads.
+#
+# Run:  python -m aaroh_ai.training.train --config src/aaroh_ai/training/configs/crop_ranker_softprob_v1.yaml
+
+name: crop-ranker
+version: "1.0.0"
+seed: 42
+notes: "v1 baseline: LightGBM multiclass softprob on the hard label; ranking read from the probability vector."
+
+split:
+  ratios: [0.70, 0.15, 0.15]   # stratified by hard label; switch to grouped-by-field with real data (ADR-0002)
+
+model:
+  framework: lightgbm
+  objective: multiclass
+  params:
+    n_estimators: 600
+    learning_rate: 0.05
+    num_leaves: 63
+    max_depth: -1
+    subsample: 0.9
+    colsample_bytree: 0.9
+    min_child_samples: 20
+    reg_lambda: 1.0
+    reg_alpha: 0.0
+    early_stopping_rounds: 50   # popped before the estimator is built; needs the val fold
+
+tuning:
+  enabled: false                # flip on to search NDCG@3 on the val fold
+  n_trials: 40
+
+gates:
+  min_top3: null                # null → compare to the active model; first model is informational
+  ndcg3_not_worse_than_baseline: true
+  max_ece: 0.15
+  require_golden_pass: true
+
+registry:
+  activate: true                # promote to active iff gates pass
+
+onnx:
+  enabled: true
+  atol: 1.0e-4
+  parity_rows: 256

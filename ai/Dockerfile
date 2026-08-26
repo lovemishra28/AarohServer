@@ -4,9 +4,12 @@
 FROM python:3.12-slim
 
 WORKDIR /app
+ENV AAROH_MODEL_REGISTRY=/app/models/registry/registry.json
+ENV AAROH_REGION_CONFIG_DIR=/app/src/aaroh_ai/services/agronomy/regions
 
 COPY pyproject.toml ./
 COPY src ./src
+COPY models ./models
 
 RUN pip install --no-cache-dir .
 

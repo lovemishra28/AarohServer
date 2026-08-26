@@ -1,0 +1,52 @@
+# v1.1 CHALLENGER — LightGBM LambdaMART (lambdarank) on the SOFT label.
+#
+# Reframes recommendation as learning-to-rank: each field is a query, the 20
+# crops are its documents, and the soft-label probability (quantised to integer
+# grades) is graded relevance. This is the model that most directly optimises
+# what we measure (NDCG@3). Compare it head-to-head with the softprob baseline;
+# keep whichever wins.
+#
+# ONNX is disabled: the LTR model emits per-candidate scores needing an external
+# softmax, so its ONNX freeze is the deferred score-export path. It is therefore
+# registered and evaluated but NOT auto-activated — promoting it to the served
+# model is a conscious step once score-export exists.
+#
+# Run:  python -m aaroh_ai.training.train --config src/aaroh_ai/training/configs/crop_ranker_lambdamart_v1.yaml
+
+name: crop-ranker-ltr
+version: "1.1.0"
+seed: 42
+notes: "v1.1 challenger: LightGBM lambdarank on soft-label graded relevance; ONNX export deferred (LTR score path)."
+
+split:
+  ratios: [0.70, 0.15, 0.15]
+
+model:
+  framework: lightgbm
+  objective: lambdarank
+  params:
+    n_estimators: 800
+    learning_rate: 0.05
+    num_leaves: 63
+    max_depth: -1
+    subsample: 0.9
+    colsample_bytree: 0.9
+    min_child_samples: 20
+    reg_lambda: 1.0
+    early_stopping_rounds: 50
+
+tuning:
+  enabled: false
+  n_trials: 40
+
+gates:
+  min_top3: null
+  ndcg3_not_worse_than_baseline: true
+  max_ece: 0.20                 # LTR scores are less naturally calibrated than softprob; looser gate
+  require_golden_pass: true
+
+registry:
+  activate: false               # challenger: compare first; promotion needs the LTR ONNX path
+
+onnx:
+  enabled: false                # deferred for learning-to-rank (see export/onnx_export.py)

@@ -5,6 +5,13 @@ import { describeError } from './errors';
 import { logger } from './logger';
 
 /**
+ * Something that can run a query: either the shared pool or a dedicated client
+ * checked out for a transaction. Repository functions take one of these so the
+ * same function works standalone (`getPool()`) and inside `withClient()`.
+ */
+export type Queryable = Pool | PoolClient;
+
+/**
  * Shared PostgreSQL connection pool.
  *
  * Created lazily rather than at import time so that importing anything from

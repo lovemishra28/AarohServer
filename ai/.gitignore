@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Trained model binaries are large and reproducible from a registered run —
+# the registry.json (which records dataset_hash + metrics + artifact path) is
+# the source of truth and IS committed. Keep the folder, ignore its contents.
+models/artifacts/*
+!models/artifacts/.gitkeep
+
+# Derived data zones — regenerated from datasets/raw, never hand-edited.
+datasets/interim/*
+!datasets/interim/.gitkeep
+datasets/processed/*
+!datasets/processed/.gitkeep
+datasets/external/*
+!datasets/external/.gitkeep
+
+# One-off eval outputs written outside a registered artifact dir.
+/tmp_reports/
+*.tmp

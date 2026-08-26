@@ -1,0 +1,74 @@
+{
+  "_meta": {
+    "region_code": "chambal",
+    "version": "2026.08-provisional",
+    "agronomy_version": "chambal-stcr@2026.08-provisional",
+    "provisional": true,
+    "authored_by": "aaroh_ai (seeded defaults) — NOT an agronomist sign-off",
+    "authored_on": "2026-08-26",
+    "review_required": [
+      "PER-CROP RDF (rdf_kgha): these are generic Indian recommended doses, NOT Chambal/MP-specific. mishr to supply/validate authoritative RDF per the 'you provide the dose table' decision.",
+      "CLASS MULTIPLIERS (Low=1.25, Medium=1.0, High=0.0): the High=0 rule is what makes a nutrient 'sufficient -> add nothing'; confirm this is the intended Low/Med/High response.",
+      "LEGUME N-RDF set to 0 (Chickpea, Arhar, Moong, Urad, Soybean, Groundnut fix atmospheric N; starter N omitted in v1). Confirm whether a starter dose (~20 kg N/ha) is wanted.",
+      "SOIL-TEST RATING THRESHOLDS (soil_rating): standard ICAR class limits on an ELEMENTAL kg/ha basis (N 280/560, Olsen-P 10/25, K 110/280). The 7-in-1 probe reports a PROXY, not a wet-chemistry available-nutrient value -- hence the standing 'npk_proxy_uncalibrated' warning until per-device calibration exists.",
+      "PRICES (inr_per_bag): provisional retail; verify against local Chambal dealer MRP.",
+      "BAG SIZE: v1 models ALL products as 50 kg bags to match the frozen RecommendationResult field 'bags_50kg'. In reality urea is sold in 45 kg bags. Decide: keep 50 kg notional, or evolve the contract to per-product bag sizes.",
+      "ROUNDING: whole bags via round-half-up (nearest). Decide nearest vs round-up (round-up guarantees adequacy but over-applies)."
+    ]
+  },
+
+  "factors": {
+    "mgkg_to_kgha": 1.95,
+    "p_to_p2o5": 2.291,
+    "k_to_k2o": 1.205,
+    "_note": "mgkg_to_kgha: mg/kg -> kg/ha assumes bulk density 1.3 g/cm3 over 15 cm depth (guide locks 1.95 over the 2.0 rule of thumb). USED in v1: converts probe mg/kg to the kg/ha basis the soil_rating limits use. p_to_p2o5 / k_to_k2o (the 'oxide trap' constants, elemental P->P2O5 x2.291, elemental K->K2O x1.205) are RESERVED: they are NOT on the class-based v1 number path (RDF is already stated as oxide N-P2O5-K2O and products are graded as oxide, so dose->product needs no conversion). They exist here as the single source of truth for the ICAR-STCR targeted-yield equation that will replace dose_model later, where requirement and soil-supply must be reconciled in one unit."
+  },
+
+  "bag_kg": 50,
+  "rounding": "nearest",
+
+  "products": {
+    "Urea":  { "n_pct": 46, "p2o5_pct": 0,  "k2o_pct": 0,  "inr_per_bag": 296.0,  "supplies": ["N"] },
+    "DAP":   { "n_pct": 18, "p2o5_pct": 46, "k2o_pct": 0,  "inr_per_bag": 1350.0, "supplies": ["P2O5", "N"] },
+    "MOP":   { "n_pct": 0,  "p2o5_pct": 0,  "k2o_pct": 60, "inr_per_bag": 1700.0, "supplies": ["K2O"] },
+    "_note": "Grades are standard: Urea 46-0-0, DAP 18-46-0, MOP 0-0-60 (N-P2O5-K2O). Allocation order: DAP meets P2O5 (crediting its N), Urea meets residual N, MOP meets K2O. real_bag_kg for urea is 45 in the market; see review_required."
+  },
+
+  "soil_rating": {
+    "_basis": "ELEMENTAL kg/ha, matching how Indian soil-test ratings are quoted. classify.py converts the probe's elemental mg/kg to kg/ha (x mgkg_to_kgha) and compares directly to these limits -- NO oxide conversion in the class-based v1 (that would misclassify: the P<10 figure is elemental Olsen-P, not P2O5). value < low_max => Low; value < med_max => Medium; else High. N: alkaline-KMnO4 available N. P: Olsen available P (elemental). K: ammonium-acetate available K (elemental).",
+    "n_kgha": { "low_max": 280.0, "med_max": 560.0 },
+    "p_kgha": { "low_max": 10.0,  "med_max": 25.0 },
+    "k_kgha": { "low_max": 110.0, "med_max": 280.0 }
+  },
+
+  "dose_model": {
+    "type": "class_adjusted_rdf",
+    "_note": "dose(crop, nutrient) = rdf_kgha[crop][nutrient] x class_multiplier[soil_class_of_that_nutrient]. Each nutrient uses its OWN soil class. This is the deterministic, class-based v1; an ICAR-STCR targeted-yield equation can replace this block later without touching product allocation / cost.",
+    "class_multiplier": { "Low": 1.25, "Medium": 1.0, "High": 0.0 }
+  },
+
+  "legumes": ["Chickpea", "Arhar", "Moong", "Urad", "Soybean", "Groundnut"],
+
+  "crops": {
+    "Rice":      { "hi": "धान",      "rdf_kgha": { "n": 100, "p2o5": 50,  "k2o": 50 } },
+    "Wheat":     { "hi": "गेहूँ",    "rdf_kgha": { "n": 120, "p2o5": 60,  "k2o": 40 } },
+    "Maize":     { "hi": "मक्का",    "rdf_kgha": { "n": 120, "p2o5": 60,  "k2o": 40 } },
+    "Bajra":     { "hi": "बाजरा",    "rdf_kgha": { "n": 80,  "p2o5": 40,  "k2o": 20 } },
+    "Jowar":     { "hi": "ज्वार",    "rdf_kgha": { "n": 80,  "p2o5": 40,  "k2o": 20 } },
+    "Ragi":      { "hi": "रागी",     "rdf_kgha": { "n": 60,  "p2o5": 30,  "k2o": 20 } },
+    "Soybean":   { "hi": "सोयाबीन",  "rdf_kgha": { "n": 0,   "p2o5": 60,  "k2o": 40 } },
+    "Groundnut": { "hi": "मूंगफली",  "rdf_kgha": { "n": 0,   "p2o5": 40,  "k2o": 40 } },
+    "Chickpea":  { "hi": "चना",      "rdf_kgha": { "n": 0,   "p2o5": 40,  "k2o": 20 } },
+    "Arhar":     { "hi": "अरहर",     "rdf_kgha": { "n": 0,   "p2o5": 45,  "k2o": 20 } },
+    "Moong":     { "hi": "मूंग",     "rdf_kgha": { "n": 0,   "p2o5": 40,  "k2o": 20 } },
+    "Urad":      { "hi": "उड़द",      "rdf_kgha": { "n": 0,   "p2o5": 40,  "k2o": 20 } },
+    "Mustard":   { "hi": "सरसों",    "rdf_kgha": { "n": 80,  "p2o5": 40,  "k2o": 30 } },
+    "Cotton":    { "hi": "कपास",     "rdf_kgha": { "n": 120, "p2o5": 60,  "k2o": 60 } },
+    "Sugarcane": { "hi": "गन्ना",    "rdf_kgha": { "n": 250, "p2o5": 115, "k2o": 115 } },
+    "Jute":      { "hi": "जूट",      "rdf_kgha": { "n": 60,  "p2o5": 30,  "k2o": 30 } },
+    "Potato":    { "hi": "आलू",      "rdf_kgha": { "n": 180, "p2o5": 80,  "k2o": 100 } },
+    "Tomato":    { "hi": "टमाटर",    "rdf_kgha": { "n": 150, "p2o5": 60,  "k2o": 60 } },
+    "Onion":     { "hi": "प्याज",    "rdf_kgha": { "n": 110, "p2o5": 50,  "k2o": 50 } },
+    "Garlic":    { "hi": "लहसुन",    "rdf_kgha": { "n": 100, "p2o5": 50,  "k2o": 50 } }
+  }
+}

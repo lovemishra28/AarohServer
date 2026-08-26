@@ -1,0 +1,39 @@
+# ZERO-DEPENDENCY SMOKE — the DummyRanker (pure numpy).
+#
+# Exercises the entire pipeline (load → validate → features → split → fit →
+# evaluate → golden → gates → register → report) on a machine that has only
+# numpy/pandas — no LightGBM, XGBoost, ONNX or Optuna. The dummy is a weak
+# prior-plus-noise model: it will FAIL the golden gate and so is registered but
+# never activated. That is the intended demonstration that gates decide
+# activation, not registration.
+#
+# Run:  python -m aaroh_ai.training.train --config src/aaroh_ai/training/configs/crop_ranker_dummy_smoke.yaml
+
+name: crop-ranker
+version: "0.0.1-dummy"
+seed: 42
+notes: "Sandbox smoke test with the pure-numpy DummyRanker; not a real model."
+
+split:
+  ratios: [0.70, 0.15, 0.15]
+
+model:
+  framework: dummy
+  objective: softprob
+  params:
+    tilt: 0.5
+
+tuning:
+  enabled: false
+
+gates:
+  max_ece: 0.15
+  ndcg3_not_worse_than_baseline: true
+  require_golden_pass: true
+
+registry:
+  activate: true                # ignored for the dummy framework — it never activates
+
+onnx:
+  enabled: true                 # skipped for the dummy framework
+  atol: 1.0e-4

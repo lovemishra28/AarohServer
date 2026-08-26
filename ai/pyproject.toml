@@ -7,9 +7,39 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
+    # Needed by the SHARED feature pipeline (features/feature_pipeline.py), which
+    # the inference service imports at serve time — keep these in the base runtime.
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyyaml>=6.0",
+    # The serving path runs the frozen model.onnx under onnxruntime, so the
+    # inference image needs this at runtime (not just for the train-time parity
+    # check). Kept lightweight; the ML frameworks themselves stay in [train].
+    "onnxruntime>=1.17",
 ]
 
+[project.scripts]
+aaroh-recommend = "aaroh_ai.inference.cli:main"
+
 [project.optional-dependencies]
+# Everything needed to TRAIN, EVALUATE, REGISTER and EXPORT a model. The
+# deployed inference image does not need these — only `pip install -e .` +, in
+# Phase 2, a model runtime. Install for Phase-1 work with:
+#     pip install -e ".[train,dev]"
+train = [
+    "scikit-learn>=1.4",     # isotonic calibration, utilities
+    "lightgbm>=4.3",         # primary ranker (GBDT)
+    "xgboost>=2.0",          # benchmark ranker (GBDT)
+    "scipy>=1.11",           # stats used by sklearn/optuna
+    "optuna>=3.6",           # hyperparameter search
+    "matplotlib>=3.8",       # confusion matrix + reliability diagram
+    "jinja2>=3.1",           # HTML eval report
+    "onnx>=1.15",            # frozen, portable model format
+    "onnxmltools>=1.12",     # LightGBM/XGBoost -> ONNX
+    "skl2onnx>=1.16",        # sklearn calibrator -> ONNX
+    "onnxconverter-common>=1.14",
+    "onnxruntime>=1.17",     # parity check of the exported ONNX graph
+]
 dev = [
     "pytest>=8.2",
     "ruff>=0.5",

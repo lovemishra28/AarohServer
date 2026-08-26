@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "seed": "tsx scripts/seed.ts",
     "migrate:up": "node-pg-migrate up -m ../database/migrations",
     "migrate:down": "node-pg-migrate down -m ../database/migrations",
     "migrate:create": "node-pg-migrate create -m ../database/migrations --"

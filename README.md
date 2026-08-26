@@ -10,7 +10,8 @@ This repository is everything that runs **off-device**. The firmware lives with 
 mobile app lives in `AarohClient`.
 
 - **Technical plan:** [`SERVER_DEVELOPMENT_GUIDE.md`](./SERVER_DEVELOPMENT_GUIDE.md) — read §1 and §2 before writing code.
-- **Stack decisions & rationale:** [`docs/adr/0001-stack-and-foundations.md`](./docs/adr/0001-stack-and-foundations.md)
+- **AI subsystem (the crop ranker):** [`ai/README.md`](./ai/README.md) — how to train, evaluate, and register a model.
+- **Architecture decisions:** [`docs/adr/`](./docs/adr/) — [0001 stack](./docs/adr/0001-stack-and-foundations.md), [0002 feature pipeline & splits](./docs/adr/0002-feature-pipeline-and-splits.md), [0003 file model registry](./docs/adr/0003-file-model-registry.md), [0004 two engines](./docs/adr/0004-two-engines.md).
 - **API structure conventions:** [`docs/api-conventions.md`](./docs/api-conventions.md)
 
 ---
@@ -124,13 +125,29 @@ Phase numbering follows `SERVER_DEVELOPMENT_GUIDE.md` §2. Each phase ends in so
 | Phase | What | Status |
 |---|---|---|
 | 0 | Foundations — repo, compose, CI, baseline migration | **done** |
-| 1 | AI trustworthiness — train + evaluate the crop ranker | **current** |
-| 2 | Backend core — full schema, auth, inference service, agronomy engine | |
-| 3 | Manual-input app flow — first end-to-end demo, no hardware | |
+| 1 | AI trustworthiness — train + evaluate the crop ranker | **built** |
+| 2 | Backend core — full schema, auth, inference service, agronomy engine | **built** |
+| 3 | Manual-input app flow — first end-to-end demo, no hardware | next |
 | 4 | Hardware loop — BLE ingest, offline queue (needs firmware temp + GPS fixes) | |
 | 5 | Geospatial — GPS clustering, field boundaries, area | |
 | 6 | Pilot hardening — monitoring, feedback, calibration → **v1 / MVP** | |
 | 7+ | Advanced AI — yield, chatbot (RAG), disease vision, personalisation | |
+
+Phase 1 is code-complete and verified end-to-end: the training pipeline, ranking
+metrics, agronomic golden tests, file registry, HTML eval report, and ONNX export
+are all built and covered by a 45-test suite. Producing the actual **registered,
+active model + its report** (the phase's deliverable) is one command — see
+[`ai/README.md`](./ai/README.md) → *Train a model*. Activation is gated: a model
+goes live only if it beats the baseline on Top-3/NDCG@3, is well-calibrated, and
+passes every golden test.
+
+Phase 2 is built: the full v1 Postgres schema + migrations, phone-OTP auth with
+RBAC, every resource endpoint, the private Node→Python gateway, the persisted
+money path (`POST /v1/fields/:id/recommendations`), config + feedback, and an
+OpenAPI contract. It type-checks and lints clean; the database migrations, the
+`vitest` suite, and the curl end-to-end run on your machine (see
+[`docs/PHASE_2_BLOCK_2_CHECKPOINT.md`](./docs/PHASE_2_BLOCK_2_CHECKPOINT.md) §6)
+to formally close the phase's definition of done.
 
 Known gaps designed around, not yet fixed (guide §13): firmware measures temperature but does not
 log it; GPS still emits `GPS:PENDING`; sensor NPK is an uncalibrated EC-derived proxy, so readings

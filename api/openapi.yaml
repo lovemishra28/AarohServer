@@ -1,0 +1,628 @@
+openapi: 3.0.3
+info:
+  title: Aaroh API
+  version: "1.0.0"
+  description: >
+    Public v1 API for the Aaroh soil-advisory platform. The mobile app talks only
+    to this service; the Python inference service (§6.3) is private and never
+    exposed here. Authentication is phone + one-time code (dev stub) yielding a
+    short-lived HS256 access token and a rotating refresh token.
+
+
+    Money path (§10): POST /v1/fields/{id}/recommendations turns a soil reading
+    into costed crop + fertiliser advice, in whole 50 kg bags and rupees.
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: health
+  - name: auth
+  - name: me
+  - name: devices
+  - name: fields
+  - name: readings
+  - name: recommendations
+  - name: config
+  - name: feedback
+
+paths:
+  /v1/health:
+    get:
+      tags: [health]
+      summary: Liveness + dependency check
+      security: []
+      responses:
+        "200":
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /v1/auth/otp/request:
+    post:
+      tags: [auth]
+      summary: Request a one-time login code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { $ref: "#/components/schemas/Phone" }
+      responses:
+        "200":
+          description: Code issued (dev stub returns dev_code in non-production)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent: { type: boolean, example: true }
+                  expires_in_s: { type: integer, example: 300 }
+                  dev_code: { type: string, nullable: true, example: "000000" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/otp/verify:
+    post:
+      tags: [auth]
+      summary: Exchange a valid code for tokens (creates the farmer on first login)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone: { $ref: "#/components/schemas/Phone" }
+                code: { type: string, pattern: "^\\d{4,8}$", example: "000000" }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - type: object
+                    properties:
+                      farmer: { $ref: "#/components/schemas/Farmer" }
+                  - $ref: "#/components/schemas/TokenBundle"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate a refresh token for a new bundle
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: New token bundle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenBundle" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/me:
+    get:
+      tags: [me]
+      summary: The authenticated farmer's profile
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  farmer: { $ref: "#/components/schemas/Farmer" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/devices/pair:
+    post:
+      tags: [devices]
+      summary: Claim (pair) a probe by serial
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serial]
+              properties:
+                serial: { type: string, minLength: 3, maxLength: 120 }
+                firmware_version: { type: string, maxLength: 60 }
+      responses:
+        "200":
+          description: Device paired
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  device: { $ref: "#/components/schemas/Device" }
+
+  /v1/devices:
+    get:
+      tags: [devices]
+      summary: The caller's paired devices
+      responses:
+        "200":
+          description: Devices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  devices:
+                    type: array
+                    items: { $ref: "#/components/schemas/Device" }
+
+  /v1/fields:
+    get:
+      tags: [fields]
+      summary: The caller's fields
+      responses:
+        "200":
+          description: Fields
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fields:
+                    type: array
+                    items: { $ref: "#/components/schemas/Field" }
+    post:
+      tags: [fields]
+      summary: Create a field
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+                area_ha: { type: number, exclusiveMinimum: 0, maximum: 100000 }
+                region_code: { type: string, default: chambal }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  field: { $ref: "#/components/schemas/Field" }
+
+  /v1/fields/{id}:
+    get:
+      tags: [fields]
+      summary: A field plus its latest reading
+      parameters: [ { $ref: "#/components/parameters/FieldId" } ]
+      responses:
+        "200":
+          description: Field detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  field: { $ref: "#/components/schemas/Field" }
+                  latest_reading:
+                    oneOf:
+                      - $ref: "#/components/schemas/Reading"
+                      - type: "null"
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/fields/{id}/readings:
+    get:
+      tags: [fields, readings]
+      summary: The field's readings, newest first
+      parameters: [ { $ref: "#/components/parameters/FieldId" } ]
+      responses:
+        "200":
+          description: Readings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  readings:
+                    type: array
+                    items: { $ref: "#/components/schemas/Reading" }
+
+  /v1/fields/{id}/recommendations:
+    post:
+      tags: [recommendations]
+      summary: Money path — generate costed crop + fertiliser advice (§10)
+      description: >
+        Runs the field's latest (or a pinned) reading through the AI ranker and
+        the deterministic agronomy engine. An empty body is valid: it uses the
+        latest reading, the field's area, and the default agro-climatic context.
+      parameters: [ { $ref: "#/components/parameters/FieldId" } ]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reading_id: { type: string, format: uuid }
+                area_ha: { type: number, exclusiveMinimum: 0, maximum: 100000 }
+                season: { type: string, example: Rabi }
+                soil_type: { type: string, example: alluvial }
+                humidity: { type: number, minimum: 0, maximum: 100 }
+                rainfall: { type: number, minimum: 0 }
+                budget_hint: { type: number, minimum: 0 }
+      responses:
+        "201":
+          description: Recommendation created and persisted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recommendation: { $ref: "#/components/schemas/Recommendation" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422":
+          description: >
+            Reading missing required soil fields (READING_INCOMPLETE), field has
+            no readings (NO_READING), or no area set (AREA_REQUIRED).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+        "504": { $ref: "#/components/responses/Error" }
+    get:
+      tags: [recommendations]
+      summary: The field's saved recommendations, newest first
+      parameters: [ { $ref: "#/components/parameters/FieldId" } ]
+      responses:
+        "200":
+          description: Recommendations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recommendations:
+                    type: array
+                    items: { $ref: "#/components/schemas/Recommendation" }
+
+  /v1/readings:
+    post:
+      tags: [readings]
+      summary: Ingest one reading or a batch (idempotent by idempotency_key)
+      description: >
+        Accepts either a single reading object or an envelope { readings: [...] }.
+        Repeats carrying the same idempotency_key are no-ops.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/ReadingInput"
+                - type: object
+                  required: [readings]
+                  properties:
+                    readings:
+                      type: array
+                      minItems: 1
+                      maxItems: 500
+                      items: { $ref: "#/components/schemas/ReadingInput" }
+      responses:
+        "201":
+          description: Ingest result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  readings:
+                    type: array
+                    items: { $ref: "#/components/schemas/Reading" }
+                  created_count: { type: integer }
+                  duplicate_count: { type: integer }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/config/region/{code}:
+    get:
+      tags: [config]
+      summary: Active agronomy configuration for a region
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string, example: chambal }
+      responses:
+        "200":
+          description: Region config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config: { $ref: "#/components/schemas/RegionConfig" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /v1/feedback:
+    post:
+      tags: [feedback]
+      summary: Record ground-truth outcome for a recommendation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [recommendation_id]
+              properties:
+                recommendation_id: { type: string, format: uuid }
+                chosen_crop: { type: string, maxLength: 80 }
+                actually_planted: { type: string, maxLength: 80 }
+                outcome: { type: string, maxLength: 2000 }
+                lab_test: { type: object, additionalProperties: true }
+      responses:
+        "201":
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback: { $ref: "#/components/schemas/Feedback" }
+        "404": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  security:
+    - bearerAuth: []
+  parameters:
+    FieldId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  schemas:
+    Phone:
+      type: string
+      pattern: "^\\+?\\d{10,15}$"
+      example: "+919876543210"
+    ErrorEnvelope:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            details: {}
+        requestId: { type: string }
+    TokenBundle:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, example: 900 }
+        role: { type: string, enum: [farmer, agent, admin] }
+    Farmer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        phone: { type: string }
+        name: { type: string, nullable: true }
+        preferred_lang: { type: string, enum: [hi, en] }
+        region_code: { type: string }
+        role: { type: string, enum: [farmer, agent, admin] }
+        created_at: { type: string, format: date-time }
+    Device:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        serial: { type: string }
+        firmware_version: { type: string, nullable: true }
+        owner_farmer_id: { type: string, format: uuid, nullable: true }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    Field:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        farmer_id: { type: string, format: uuid }
+        name: { type: string, nullable: true }
+        area_ha: { type: number, nullable: true }
+        region_code: { type: string }
+        centroid: { nullable: true, description: GeoJSON Point or null }
+        boundary: { nullable: true, description: GeoJSON Polygon or null }
+        created_at: { type: string, format: date-time }
+    ReadingInput:
+      type: object
+      description: NPK are elemental mg/kg (probe basis), never oxide.
+      properties:
+        field_id: { type: string, format: uuid }
+        device_id: { type: string, format: uuid }
+        source: { type: string, enum: [probe_ble, manual, import] }
+        taken_at: { type: string, format: date-time }
+        n_mgkg: { type: number, minimum: 0 }
+        p_mgkg: { type: number, minimum: 0 }
+        k_mgkg: { type: number, minimum: 0 }
+        ph: { type: number, minimum: 3, maximum: 10 }
+        ec_uscm: { type: number, minimum: 0 }
+        moisture_vwc: { type: number, minimum: 0, maximum: 100 }
+        soil_temp_c: { type: number }
+        npk_is_calibrated: { type: boolean, default: false }
+        idempotency_key: { type: string, minLength: 1, maxLength: 200 }
+        raw_frame: { type: string, maxLength: 10000 }
+      required: [source]
+    Reading:
+      allOf:
+        - $ref: "#/components/schemas/ReadingInput"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            location: { nullable: true, description: GeoJSON Point or null }
+            created_at: { type: string, format: date-time }
+    NutrientGap:
+      type: object
+      properties:
+        n_kgha: { type: number }
+        p2o5_kgha: { type: number }
+        k2o_kgha: { type: number }
+    ProductLine:
+      type: object
+      properties:
+        name: { type: string, example: DAP }
+        bags_50kg: { type: integer, example: 1 }
+        kg: { type: number, example: 50 }
+        supplies:
+          type: object
+          additionalProperties: { type: number }
+    Fertiliser:
+      type: object
+      properties:
+        products:
+          type: array
+          items: { $ref: "#/components/schemas/ProductLine" }
+        nutrient_gap_kgha: { $ref: "#/components/schemas/NutrientGap" }
+        cost_inr: { type: number, example: 1942 }
+    CropRank:
+      type: object
+      properties:
+        crop: { type: string }
+        crop_hi: { type: string }
+        score: { type: number }
+        rationale_code: { type: string }
+    CropPlan:
+      allOf:
+        - $ref: "#/components/schemas/CropRank"
+        - type: object
+          properties:
+            fertiliser: { $ref: "#/components/schemas/Fertiliser" }
+    RecommendationResult:
+      type: object
+      description: The frozen §6.4 payload the app renders.
+      properties:
+        model_version: { type: string, example: "crop-ranker@1.0.0" }
+        agronomy_version: { type: string, example: "chambal-stcr@2026.08-provisional" }
+        region_code: { type: string }
+        area_ha: { type: number }
+        segment_a:
+          type: array
+          items: { $ref: "#/components/schemas/CropRank" }
+        segment_b:
+          type: array
+          items: { $ref: "#/components/schemas/CropPlan" }
+        warnings:
+          type: array
+          items: { type: string }
+    Recommendation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        field_id: { type: string, format: uuid }
+        reading_id: { type: string, format: uuid, nullable: true }
+        model_version: { type: string }
+        agronomy_version: { type: string }
+        region_code: { type: string }
+        area_ha: { type: number }
+        result: { $ref: "#/components/schemas/RecommendationResult" }
+        created_at: { type: string, format: date-time }
+    RegionConfig:
+      type: object
+      properties:
+        region_code: { type: string }
+        version: { type: string }
+        agronomy_version: { type: string }
+        provisional: { type: boolean }
+        bag_kg: { type: number, example: 50 }
+        rounding: { type: string, enum: [nearest, up] }
+        class_multipliers:
+          type: object
+          properties:
+            low: { type: number, example: 1.25 }
+            medium: { type: number, example: 1.0 }
+            high: { type: number, example: 0.0 }
+        soil_class_thresholds:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              low_max: { type: number }
+              med_max: { type: number }
+        conversion_factors:
+          type: object
+          properties:
+            mgkg_to_kgha: { type: number, example: 1.95 }
+            p_to_p2o5: { type: number, example: 2.291 }
+            k_to_k2o: { type: number, example: 1.205 }
+        products:
+          type: array
+          items:
+            type: object
+            properties:
+              product: { type: string }
+              n_pct: { type: number }
+              p2o5_pct: { type: number }
+              k2o_pct: { type: number }
+              inr_per_bag: { type: number }
+              supplies:
+                type: array
+                items: { type: string }
+        crops:
+          type: array
+          items:
+            type: object
+            properties:
+              crop: { type: string }
+              crop_hi: { type: string }
+              rdf_kgha:
+                type: object
+                properties:
+                  n: { type: number }
+                  p2o5: { type: number }
+                  k2o: { type: number }
+              is_legume: { type: boolean }
+    Feedback:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        recommendation_id: { type: string, format: uuid }
+        farmer_id: { type: string, format: uuid }
+        chosen_crop: { type: string, nullable: true }
+        actually_planted: { type: string, nullable: true }
+        outcome: { type: string, nullable: true }
+        lab_test: { type: object, nullable: true, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+
+security:
+  - bearerAuth: []
