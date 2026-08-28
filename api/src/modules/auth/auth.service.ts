@@ -11,9 +11,10 @@ import {
   upsertFarmerByPhone,
 } from '../farmers/farmers.repo';
 
-interface OtpRow {
+export interface OtpRow {
   id: string;
-  phone: string;
+  phone: string | null;
+  email: string | null;
   code: string;
   purpose: string;
   expires_at: Date;
@@ -31,6 +32,12 @@ export interface TokenBundle {
   role: string;
 }
 
+/** What every provider route resolves to — one shape, one response envelope. */
+export interface AuthResult {
+  farmer: PublicFarmer;
+  tokens: TokenBundle;
+}
+
 export interface OtpRequestResult {
   sent: true;
   expires_in_s: number;
@@ -38,17 +45,17 @@ export interface OtpRequestResult {
   dev_code?: string;
 }
 
-const isProd = env.NODE_ENV === 'production';
+export const isProd = env.NODE_ENV === 'production';
 
 /** Constant-time string comparison that tolerates unequal lengths. */
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a, 'utf8');
   const bb = Buffer.from(b, 'utf8');
   if (ab.length !== bb.length) return false;
   return timingSafeEqual(ab, bb);
 }
 
-function sha256(value: string): string {
+export function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
@@ -56,8 +63,12 @@ function sha256(value: string): string {
  * Issue an access JWT + a fresh opaque refresh token, persisting only the SHA-256
  * of the refresh token so it can be revoked. Runs on whatever `Queryable` it is
  * given so it can join the verify/refresh transactions.
+ *
+ * Exported because every provider — phone OTP, email+password, email OTP, and
+ * Google — must mint sessions *identically*. A second implementation is how a
+ * back door gets added by accident.
  */
-async function issueTokens(farmer: FarmerRow, db: Queryable): Promise<TokenBundle> {
+export async function issueTokens(farmer: FarmerRow, db: Queryable): Promise<TokenBundle> {
   const accessToken = signJwt(
     { sub: farmer.id, role: farmer.role, typ: 'access' },
     env.JWT_SECRET,
@@ -115,36 +126,52 @@ export async function requestOtp(phone: string): Promise<OtpRequestResult> {
 }
 
 /**
- * Verify a code and log the farmer in, creating the farmer on first login
- * (§6.1). Mismatches increment the attempt counter and eventually lock the
- * challenge; success consumes it and issues tokens — all in one transaction.
+ * Reject a challenge that cannot be redeemed, and count a wrong code against it.
+ *
+ * Shared by the phone and email flows so both enforce the same rules — expiry,
+ * a hard attempt ceiling, single use — from one place. `attempts` is incremented
+ * on the *server* copy rather than trusting the client to stop retrying, which is
+ * what makes a 6-digit code safe: 5 guesses out of a million, not unlimited.
  */
-export async function verifyOtp(
-  phone: string,
+export async function redeemChallenge(
+  challenge: OtpRow | undefined,
   code: string,
-): Promise<{ farmer: PublicFarmer; tokens: TokenBundle }> {
-  const pool = getPool();
-  const { rows } = await pool.query<OtpRow>(
-    "SELECT * FROM otp_challenges WHERE phone = $1 AND purpose = 'login' ORDER BY created_at DESC LIMIT 1",
-    [phone],
-  );
-  const challenge = rows[0];
-
+  labels: { missing: string; expired: string },
+  db: Queryable = getPool(),
+): Promise<OtpRow> {
   if (!challenge || challenge.consumed_at) {
-    throw new AppError('OTP_INVALID', 'No active code for this number. Request a new one.', 401);
+    throw new AppError('OTP_INVALID', labels.missing, 401);
   }
   if (challenge.expires_at.getTime() < Date.now()) {
-    throw new AppError('OTP_EXPIRED', 'This code has expired. Request a new one.', 401);
+    throw new AppError('OTP_EXPIRED', labels.expired, 401);
   }
   if (challenge.attempts >= env.OTP_MAX_ATTEMPTS) {
     throw new AppError('OTP_LOCKED', 'Too many attempts. Request a new code.', 429);
   }
   if (!safeEqual(challenge.code, code)) {
-    await pool.query('UPDATE otp_challenges SET attempts = attempts + 1 WHERE id = $1', [
+    await db.query('UPDATE otp_challenges SET attempts = attempts + 1 WHERE id = $1', [
       challenge.id,
     ]);
     throw new AppError('OTP_INVALID', 'Incorrect code.', 401);
   }
+  return challenge;
+}
+
+/**
+ * Verify a code and log the farmer in, creating the farmer on first login
+ * (§6.1). Mismatches increment the attempt counter and eventually lock the
+ * challenge; success consumes it and issues tokens — all in one transaction.
+ */
+export async function verifyOtp(phone: string, code: string): Promise<AuthResult> {
+  const pool = getPool();
+  const { rows } = await pool.query<OtpRow>(
+    "SELECT * FROM otp_challenges WHERE phone = $1 AND purpose = 'login' ORDER BY created_at DESC LIMIT 1",
+    [phone],
+  );
+  const challenge = await redeemChallenge(rows[0], code, {
+    missing: 'No active code for this number. Request a new one.',
+    expired: 'This code has expired. Request a new one.',
+  });
 
   return withClient(async (client) => {
     await client.query('BEGIN');
@@ -155,7 +182,7 @@ export async function verifyOtp(
       const farmer = await upsertFarmerByPhone(phone, client);
       const tokens = await issueTokens(farmer, client);
       await client.query('COMMIT');
-      logger.info('login_ok', { farmer_id: farmer.id, role: farmer.role });
+      logger.info('login_ok', { farmer_id: farmer.id, role: farmer.role, provider: 'phone' });
       return { farmer: toPublicFarmer(farmer), tokens };
     } catch (err) {
       await client.query('ROLLBACK');
@@ -204,5 +231,41 @@ export async function refresh(rawToken: string): Promise<TokenBundle> {
       await client.query('ROLLBACK');
       throw err;
     }
+  });
+}
+
+/**
+ * Revoke a refresh token at sign-out. Without this the client only *forgets* the
+ * token while the row stays valid for its full 30 days — anyone who lifted it off
+ * a shared or lost phone could still mint fresh access tokens long after the
+ * farmer signed out. Revoking server-side is what makes sign-out mean something.
+ *
+ * `all: true` revokes every live session for the same farmer ("sign out
+ * everywhere"), which is also what a password reset does.
+ *
+ * Deliberately silent about unknown or already-revoked tokens: sign-out must
+ * always succeed so the client can clear local state unconditionally, and an
+ * error here would only tell an attacker whether the token they hold is live.
+ */
+export async function logout(rawToken: string, all = false): Promise<{ revoked: number }> {
+  const tokenHash = sha256(rawToken);
+  return withClient(async (client) => {
+    const { rows } = await client.query<{ farmer_id: string }>(
+      'SELECT farmer_id FROM refresh_tokens WHERE token_hash = $1',
+      [tokenHash],
+    );
+    const farmerId = rows[0]?.farmer_id;
+    if (!farmerId) return { revoked: 0 };
+
+    const result = all
+      ? await client.query(
+          'UPDATE refresh_tokens SET revoked_at = now() WHERE farmer_id = $1 AND revoked_at IS NULL',
+          [farmerId],
+        )
+      : await client.query(
+          'UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL',
+          [tokenHash],
+        );
+    return { revoked: result.rowCount ?? 0 };
   });
 }

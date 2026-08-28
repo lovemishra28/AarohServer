@@ -408,8 +408,17 @@ feedback(
 |---|---|---|
 | `POST /v1/auth/otp/request` | Send OTP to phone | rate-limited |
 | `POST /v1/auth/otp/verify` | Exchange OTP → tokens | returns role |
-| `POST /v1/auth/refresh` | Refresh access token | |
+| `POST /v1/auth/email/register` | Create an email + password account | 201; scrypt; emails a verify code |
+| `POST /v1/auth/email/login` | Email + password sign-in | uniform 401, no account enumeration |
+| `POST /v1/auth/email/otp/request` | Email a code (`login` \| `email_verify`) | rate-limited per address |
+| `POST /v1/auth/email/otp/verify` | Redeem an email code → tokens | `login` creates the account |
+| `POST /v1/auth/password/forgot` | Email a reset code | always 200 |
+| `POST /v1/auth/password/reset` | Set a new password → tokens | revokes all sessions |
+| `POST /v1/auth/google` | Verify a Google ID token → tokens | RS256 + `aud` must be our client ID |
+| `POST /v1/auth/refresh` | Refresh access token | rotates the refresh token |
+| `POST /v1/auth/logout` | Revoke the refresh token | `all: true` = every session |
 | `GET  /v1/me` | Current user + prefs (lang, region) | |
+| `PATCH /v1/me` | Update name / lang / region | identity + role not patchable |
 | `GET/POST /v1/fields` | List / create fields | boundary optional |
 | `GET  /v1/fields/:id` | Field detail + latest reading | |
 | `POST /v1/devices/pair` | Register a probe to a farmer | pairing token |
@@ -420,6 +429,25 @@ feedback(
 | `POST /v1/feedback` | Farmer outcome / chosen crop / lab test | retraining signal |
 | `GET  /v1/config/region/:code` | Crop bands, units, price table version | cached, offline-cacheable |
 | `GET  /v1/health` | Liveness/readiness | includes AI-service reachability |
+
+**Three doors, one session.** Every sign-in route above returns the identical envelope
+`{ farmer, ...TokenBundle }`, which is what lets a new provider be added without touching the
+client's session handling. A farmer holds any combination of `phone` / `email` / `google_sub`
+(DB CHECK: at least one), so both `phone` and `email` are nullable on the wire.
+
+Three invariants worth restating, because getting any of them wrong is a real vulnerability
+rather than a bug:
+
+1. **`aud` must equal our own client ID** on a Google ID token. Anyone can obtain a validly
+   signed Google token — for their own app. The audience check is the only thing that makes it
+   a proof of identity here.
+2. **Link a Google account to an existing one only when `email_verified` is true.** A Workspace
+   token can carry an email the account never proved; linking on it would be account takeover.
+3. **Never reveal whether an address is registered.** Unknown-account and wrong-password
+   return the same 401 with equalised timing; `password/forgot` reports success either way.
+
+Sessions are minted in exactly one place (`issueTokens` in `auth.service.ts`). A second
+implementation is how a back door gets added by accident.
 
 ### 6.3 Internal Node ↔ Python contract
 

@@ -96,6 +96,135 @@ Create a new migration with `npm run migrate:create -- my-migration-name`.
 > `n_mgkg` / `p_mgkg` / `k_mgkg` (sensor, elemental) vs `n_kgha` / `p2o5_kgha` / `k2o_kgha`
 > (converted, oxide). **A bare `p` is a bug.**
 
+## Authentication providers
+
+Three doors, one session. Every sign-in route answers the **same** envelope —
+`{ farmer, access_token, refresh_token, token_type, expires_in, role }` — so the app stores a
+session identically no matter how it was obtained. A farmer may hold any combination of
+identifiers (`phone`, `email`, `google_sub`); a database CHECK guarantees at least one.
+
+| Door | Routes | Needs configuring? |
+|---|---|---|
+| Phone + OTP | `POST /v1/auth/otp/request` → `/otp/verify` | No — dev stub logs the code |
+| Email + password | `POST /v1/auth/email/register`, `/email/login` | No |
+| Email one-time code | `POST /v1/auth/email/otp/request` → `/email/otp/verify` | No — `MAIL_TRANSPORT=console` |
+| Forgotten password | `POST /v1/auth/password/forgot` → `/password/reset` | No |
+| Google | `POST /v1/auth/google` | **Yes** — see below |
+
+Sign-out is `POST /v1/auth/logout`, which revokes the refresh token server-side. Deleting it
+from the phone is not enough on its own: the row would otherwise stay valid for its full 30 days.
+
+Full request/response detail is in [`api/openapi.yaml`](./api/openapi.yaml).
+
+### Where settings live
+
+`src/config/env.ts` loads **`api/.env`** at boot (a small hand-rolled reader — no `dotenv`
+dependency, for the same reason `common/jwt.ts` hand-rolls HS256) and then validates every
+setting through one zod schema. Real environment variables always win over the file, so
+containers and CI are never overridden by a developer's local copy.
+
+```bash
+cd api && cp .env.example .env      # PowerShell: Copy-Item .env.example .env
+```
+
+Two files, two consumers — this catches people out:
+
+| File | Read by | Use it for |
+|---|---|---|
+| `api/.env` | `npm run dev` / `npm start` on your host | local development |
+| `.env` (repo root) | `docker compose` variable substitution | container runs |
+
+`docker-compose.yml` forwards `JWT_SECRET`, `GOOGLE_*`, `MAIL_*` and `SMTP_*` into the `api`
+service, each falling back to its schema default, so an empty root `.env` still boots.
+
+The boot log line `api_started` prints `auth_providers` and `mail_transport`. Check it first
+when a sign-in door misbehaves: `"google": false` there means the *server* has no client ID,
+which is otherwise indistinguishable on the phone from the app having none.
+
+### Email delivery
+
+Out of the box `MAIL_TRANSPORT=console` writes each message to the API log instead of sending
+it — the email equivalent of the SMS dev stub, so the whole verification/reset flow is testable
+with no provider account. Outside production the response also carries `dev_code`.
+
+For real mail set the SMTP block in `api/.env`:
+
+```dotenv
+MAIL_TRANSPORT=smtp
+MAIL_FROM=Aaroh <no-reply@yourdomain.com>
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false          # false = STARTTLS on 587; true = implicit TLS on 465
+SMTP_USER=you@gmail.com
+SMTP_PASS=<16-char app password>
+```
+
+With Gmail this must be an **App Password** (Google Account → Security → 2-Step Verification →
+App passwords), not your account password. Credentials are never transmitted unless the
+connection is encrypted first.
+
+### "Continue with Google" — Google Cloud setup
+
+This is the only door that needs an external account. Everything below happens at
+**<https://console.cloud.google.com>**.
+
+**1. Create or pick a project.** Top-left project selector → *New project* → name it (e.g.
+`aaroh`) → *Create*, then make sure it is the selected project.
+
+**2. Configure the consent screen.** *APIs & Services → OAuth consent screen*. Choose
+**External**, fill in app name, your support email, and developer contact, then save. No
+scopes need adding — the default `openid`, `email`, `profile` are what we use. While the app is
+in *Testing*, only accounts you list under *Test users* can sign in, so add your own Google
+account there. (Publishing is not required for the pilot; sign-in works for test users.)
+
+**3. Create the Web application client.** *APIs & Services → Credentials → Create credentials
+→ OAuth client ID*, Application type **Web application**, name it `aaroh-web`. No redirect URIs
+are needed. Copy the client ID — it looks like
+`1234567890-abcdefghijklmnop.apps.googleusercontent.com`.
+
+Put that **same value in both places**:
+
+```dotenv
+# AAROH-Server/api/.env      ← created by `cp .env.example .env` in api/
+GOOGLE_WEB_CLIENT_ID=1234567890-abcdefghijklmnop.apps.googleusercontent.com
+```
+
+```dotenv
+# AAROH-Client/.env          ← NOT .env.example; Expo only reads .env
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=1234567890-abcdefghijklmnop.apps.googleusercontent.com
+```
+
+They must match. The server checks that the ID token's `aud` equals its own
+`GOOGLE_WEB_CLIENT_ID`; a mismatch is rejected as `GOOGLE_TOKEN_INVALID`. That check is what
+stops a token minted for some other app from signing someone in here — so it is deliberately
+not lenient.
+
+**4. Create the Android client too.** *Create credentials → OAuth client ID*, Application type
+**Android**, package name `com.agropulse.app`, and the SHA-1 of the signing certificate:
+
+```bash
+cd AAROH-Client/android && ./gradlew signingReport    # Windows: .\gradlew signingReport
+```
+
+Use the SHA-1 under `Variant: debug` for development. You never put this client's ID in any
+config — Google matches the app by package name + fingerprint, while the ID **token** it mints
+is still addressed to the web client. That asymmetry surprises everyone; it is not a mistake.
+
+**5. Build a native app and test.** Google Sign-In uses a native module, so it does **not**
+work in Expo Go:
+
+```bash
+cd AAROH-Client
+npx expo run:android     # after changing .env: npx expo start --clear
+```
+
+Publish the release SHA-1 as a second Android client when you ship a signed APK, otherwise
+sign-in works in debug and fails in release.
+
+Leaving `GOOGLE_WEB_CLIENT_ID` unset is safe: the button still renders, the server answers
+`503 GOOGLE_NOT_CONFIGURED`, and the app shows "Google sign-in is not set up yet" rather than
+failing silently.
+
 ## Tests and checks
 
 ```bash
@@ -148,6 +277,15 @@ OpenAPI contract. It type-checks and lints clean; the database migrations, the
 `vitest` suite, and the curl end-to-end run on your machine (see
 [`docs/PHASE_2_BLOCK_2_CHECKPOINT.md`](./docs/PHASE_2_BLOCK_2_CHECKPOINT.md) §6)
 to formally close the phase's definition of done.
+
+Auth was widened during Phase 3 when the app's redesigned sign-in screen grew Sign Up, email,
+and "Continue with Google": `farmers.phone` is now nullable alongside new `email`, `google_sub`
+and `email_verified_at` columns, `otp_challenges` carries email codes as well as SMS ones, and
+the server gained email/password (scrypt), email one-time codes, password reset, Google
+ID-token verification, `PATCH /v1/me`, and `POST /v1/auth/logout`. Run
+`npm run migrate:up` before starting the API against an existing database. Every one of those
+pieces uses only `node:crypto` and `node:net`/`node:tls` — no new dependency — for the same
+reason `common/jwt.ts` hand-rolls HS256. See *Authentication providers* above.
 
 Known gaps designed around, not yet fixed (guide §13): firmware measures temperature but does not
 log it; GPS still emits `GPS:PENDING`; sensor NPK is an uncalibrated EC-derived proxy, so readings

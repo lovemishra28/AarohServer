@@ -5,8 +5,26 @@ info:
   description: >
     Public v1 API for the Aaroh soil-advisory platform. The mobile app talks only
     to this service; the Python inference service (§6.3) is private and never
-    exposed here. Authentication is phone + one-time code (dev stub) yielding a
-    short-lived HS256 access token and a rotating refresh token.
+    exposed here.
+
+
+    Authentication has three doors, all of which answer with the *same* envelope
+    — `{ farmer, ...TokenBundle }` — so the client stores a session identically no
+    matter how it was obtained:
+
+
+    * **phone** — `POST /v1/auth/otp/request` → `/v1/auth/otp/verify`
+
+    * **email** — `POST /v1/auth/email/register` | `/v1/auth/email/login`, or
+      passwordless `POST /v1/auth/email/otp/request` → `/v1/auth/email/otp/verify`;
+      forgotten passwords go `POST /v1/auth/password/forgot` → `/password/reset`
+
+    * **google** — `POST /v1/auth/google` with the ID token from the native SDK
+
+
+    A session is a short-lived HS256 access token plus a rotating opaque refresh
+    token. A farmer may hold any combination of identifiers (phone, email, Google),
+    so every one of them is nullable on the Farmer schema.
 
 
     Money path (§10): POST /v1/fields/{id}/recommendations turns a soil reading
@@ -96,6 +114,238 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
 
+  /v1/auth/email/register:
+    post:
+      tags: [auth]
+      summary: Create an account with email + password and sign in
+      security: []
+      description: >
+        Signs in immediately; a verification code is emailed alongside but the
+        session does not wait on it — `farmer.email_verified` simply stays false
+        until the code is redeemed via /v1/auth/email/otp/verify.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { $ref: "#/components/schemas/Email" }
+                password: { $ref: "#/components/schemas/Password" }
+                name: { type: string, minLength: 2, maxLength: 120 }
+      responses:
+        "201":
+          description: Account created and authenticated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Session"
+                  - type: object
+                    properties:
+                      verification:
+                        type: object
+                        properties:
+                          sent: { type: boolean }
+                          dev_code: { type: string, nullable: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "409":
+          description: EMAIL_TAKEN — an account already uses this address
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  /v1/auth/email/login:
+    post:
+      tags: [auth]
+      summary: Sign in with email + password
+      security: []
+      description: >
+        Unknown address and wrong password both answer an identical 401
+        INVALID_CREDENTIALS (with equalised timing), so this endpoint cannot be used
+        to discover which addresses are registered.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { $ref: "#/components/schemas/Email" }
+                password: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/email/otp/request:
+    post:
+      tags: [auth]
+      summary: Email a one-time code (passwordless login, or address verification)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, purpose]
+              properties:
+                email: { $ref: "#/components/schemas/Email" }
+                purpose:
+                  type: string
+                  enum: [login, email_verify]
+                  description: >
+                    `login` is passwordless sign-in and creates the account on first
+                    use, mirroring the phone flow. `email_verify` confirms the
+                    address on an existing account.
+      responses:
+        "200":
+          description: Code issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CodeIssued" }
+        "400": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/email/otp/verify:
+    post:
+      tags: [auth]
+      summary: Redeem an email code for a session
+      security: []
+      description: >
+        A `login` code creates a passwordless, already-verified account on first
+        use. Redeeming any email code also marks the address verified.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, purpose]
+              properties:
+                email: { $ref: "#/components/schemas/Email" }
+                code: { $ref: "#/components/schemas/Code" }
+                purpose: { type: string, enum: [login, email_verify] }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/password/forgot:
+    post:
+      tags: [auth]
+      summary: Email a password-reset code
+      security: []
+      description: >
+        Always 200, even for an address with no account — the response must not
+        reveal which addresses are registered. Show the same "check your inbox"
+        message either way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { $ref: "#/components/schemas/Email" }
+      responses:
+        "200":
+          description: Reported as sent (whether or not the account exists)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CodeIssued" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/password/reset:
+    post:
+      tags: [auth]
+      summary: Set a new password with a reset code, and sign in
+      security: []
+      description: >
+        Revokes every existing refresh token for the account: a reset is how a
+        farmer recovers from a compromised password, so old sessions must not
+        survive it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, password]
+              properties:
+                email: { $ref: "#/components/schemas/Email" }
+                code: { $ref: "#/components/schemas/Code" }
+                password: { $ref: "#/components/schemas/Password" }
+      responses:
+        "200":
+          description: Password changed and authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /v1/auth/google:
+    post:
+      tags: [auth]
+      summary: Exchange a Google ID token for a session
+      security: []
+      description: >
+        The client sends the **ID token** minted by the native Google Sign-In SDK.
+        The server verifies its RS256 signature against Google's published keys and
+        requires `aud` to equal its own GOOGLE_WEB_CLIENT_ID — without that audience
+        check, a token minted for any other app would be accepted. The client's
+        EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID must therefore hold the same value.
+
+
+        Account resolution: match on the immutable `sub`; else link to an existing
+        account by email, but **only when Google reports the email as verified**;
+        else create a new account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id_token]
+              properties:
+                id_token:
+                  type: string
+                  description: Compact JWS (three dot-separated segments).
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401":
+          description: GOOGLE_TOKEN_INVALID — signature, issuer, audience or expiry failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: ACCOUNT_CONFLICT — that email is already linked to a different Google account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "503":
+          description: GOOGLE_NOT_CONFIGURED, or Google's key service was unreachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /v1/auth/refresh:
     post:
       tags: [auth]
@@ -118,6 +368,44 @@ paths:
               schema: { $ref: "#/components/schemas/TokenBundle" }
         "401": { $ref: "#/components/responses/Error" }
 
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke a refresh token (sign out)
+      security: []
+      description: >
+        Unauthenticated on purpose: the refresh token *is* the credential here, and
+        sign-out must still work once the access token has expired. Always 200 —
+        an unknown or already-revoked token reports `revoked: 0` rather than an
+        error, so the client can clear local state unconditionally and nothing
+        discloses whether the presented token was live.
+
+
+        Without this the client only *forgets* the token while the row stays valid
+        for its full 30 days.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+                all:
+                  type: boolean
+                  default: false
+                  description: Revoke every live session for the farmer ("sign out everywhere").
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked: { type: integer, example: 1 }
+
   /v1/me:
     get:
       tags: [me]
@@ -132,6 +420,38 @@ paths:
                 properties:
                   farmer: { $ref: "#/components/schemas/Farmer" }
         "401": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [me]
+      summary: Update the authenticated farmer's profile
+      description: >
+        Partial patch, at least one field required. The farmer id comes from the
+        access token, never the body. Identity and privilege fields (phone, email,
+        google_sub, role) are deliberately not patchable — changing an email is an
+        identity change and needs its own verified flow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                preferred_lang: { type: string, enum: [hi, en] }
+                region_code: { type: string }
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  farmer: { $ref: "#/components/schemas/Farmer" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 
   /v1/devices/pair:
     post:
@@ -417,6 +737,27 @@ components:
       type: string
       pattern: "^\\+?\\d{10,15}$"
       example: "+919876543210"
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+      description: Lower-cased and trimmed server-side; uniqueness is case-insensitive.
+      example: farmer@example.com
+    Password:
+      type: string
+      minLength: 8
+      maxLength: 128
+      description: >
+        At least 8 characters including a letter and a digit. The 128-character
+        ceiling exists because the scrypt work factor is paid on the server's CPU.
+        NOTE: this policy is enforced on register and reset, but deliberately NOT
+        on login — a password stored before a policy change must still be usable.
+      example: paddy2024
+    Code:
+      type: string
+      pattern: "^\\d{6}$"
+      description: Six-digit one-time code. Single-use, and shares the OTP attempt ceiling.
+      example: "123456"
     ErrorEnvelope:
       type: object
       properties:
@@ -437,14 +778,42 @@ components:
         role: { type: string, enum: [farmer, agent, admin] }
     Farmer:
       type: object
+      description: >
+        A farmer holds any combination of identifiers depending on how they signed
+        up, so phone and email are both nullable — an email-only or Google-only
+        account has no phone number. A DB CHECK guarantees at least one of phone,
+        email or google_sub is present. google_sub itself is never exposed.
       properties:
         id: { type: string, format: uuid }
-        phone: { type: string }
+        phone: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        email_verified:
+          type: boolean
+          description: >
+            True once the address was proven by a code, or vouched for by Google.
+            Only a verified address may be linked to a Google account.
         name: { type: string, nullable: true }
         preferred_lang: { type: string, enum: [hi, en] }
         region_code: { type: string }
         role: { type: string, enum: [farmer, agent, admin] }
         created_at: { type: string, format: date-time }
+    Session:
+      description: What every successful sign-in returns, whichever door was used.
+      allOf:
+        - type: object
+          properties:
+            farmer: { $ref: "#/components/schemas/Farmer" }
+        - $ref: "#/components/schemas/TokenBundle"
+    CodeIssued:
+      type: object
+      description: >
+        Response to any "send me a code" request. `dev_code` is populated only
+        outside production (and when the mail transport is the console stub), so the
+        flow is testable without an SMS or email provider.
+      properties:
+        sent: { type: boolean, example: true }
+        expires_in_s: { type: integer, example: 600 }
+        dev_code: { type: string, nullable: true, example: "000000" }
     Device:
       type: object
       properties:

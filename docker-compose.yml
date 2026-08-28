@@ -50,6 +50,21 @@ services:
       # Inside compose the DB is reachable at host `db`, not localhost.
       DATABASE_URL: postgres://${POSTGRES_USER:-aaroh}:${POSTGRES_PASSWORD:-aaroh}@db:5432/${POSTGRES_DB:-aaroh}
       AI_SERVICE_URL: http://ai:8000
+      # Auth settings are NOT baked into the image — they are forwarded from the
+      # root .env so the container and a host-run `npm run dev` (which reads
+      # api/.env) can be configured to the same values. Each falls back to the
+      # schema default in api/src/config/env.ts when unset, so an empty root .env
+      # still boots; Google sign-in simply answers 503 until its client ID is set.
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me-please}
+      GOOGLE_WEB_CLIENT_ID: ${GOOGLE_WEB_CLIENT_ID:-}
+      GOOGLE_EXTRA_AUDIENCES: ${GOOGLE_EXTRA_AUDIENCES:-}
+      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-console}
+      MAIL_FROM: ${MAIL_FROM:-Aaroh <no-reply@aaroh.local>}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
     ports:
       - "3000:3000"
     depends_on:
