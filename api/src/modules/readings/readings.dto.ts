@@ -21,10 +21,16 @@ export const CreateReadingSchema = z.object({
   npk_is_calibrated: z.boolean().default(false),
   idempotency_key: z.string().trim().min(1).max(200).optional(),
   raw_frame: z.string().max(10000).optional(),
+  session_id: z.string().uuid().optional(),
+  firmware_version: z.string().max(50).optional(),
 });
 
 /** Batch ingest wrapper: POST /v1/readings accepts many readings at once. */
 export const BatchReadingsSchema = z.object({
+  device_metadata: z.object({
+    probe_id: z.string().optional(),
+    firmware_version: z.string().optional(),
+  }).optional(),
   readings: z.array(CreateReadingSchema).min(1).max(500),
 });
 

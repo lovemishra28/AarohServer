@@ -26,7 +26,7 @@ export const OtpRequestSchema = z.object({
 export const OtpCodeSchema = z
   .string()
   .trim()
-  .regex(/^\d{4,8}$/, 'code must be 4–8 digits');
+  .regex(/^\d{6}$/, 'code must be 6 digits');
 
 export const OtpVerifySchema = z.object({
   phone: PhoneSchema,
@@ -132,9 +132,8 @@ export const GoogleSignInSchema = z.object({
   id_token: z
     .string()
     .trim()
-    .min(20)
     .max(8192)
-    .regex(/^[\w-]+\.[\w-]+\.[\w-]+$/, 'id_token must be a JWT'),
+    .regex(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, 'id_token must be a JWT'),
 });
 
 export type OtpRequestBody = z.infer<typeof OtpRequestSchema>;

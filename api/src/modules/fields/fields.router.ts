@@ -22,6 +22,15 @@ fieldsRouter.use(authenticate);
 
 const IdParam = z.object({ id: z.string().uuid() });
 
+/**
+ * `limit` on the readings list. The default of 100 suits a history list, but the
+ * heat map needs every point in the field to interpolate from — a walk is 30–90
+ * readings and a re-walked plot accumulates more, so the ceiling is generous.
+ */
+const ReadingsQuery = z.object({
+  limit: z.coerce.number().int().positive().max(2000).optional(),
+});
+
 // GET /v1/fields — the caller's fields.
 fieldsRouter.get(
   '/',
@@ -53,7 +62,8 @@ fieldsRouter.get(
   '/:id/readings',
   asyncHandler(async (req, res) => {
     const { id } = parseOrThrow(IdParam, req.params);
-    res.status(200).json({ readings: await listReadings(requireAuth(req), id) });
+    const { limit } = parseOrThrow(ReadingsQuery, req.query);
+    res.status(200).json({ readings: await listReadings(requireAuth(req), id, limit) });
   }),
 );
 

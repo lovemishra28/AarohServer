@@ -10,10 +10,11 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "verify:clustering": "node --experimental-strip-types scripts/verify-clustering.mjs",
     "seed": "tsx scripts/seed.ts",
-    "migrate:up": "node-pg-migrate up -m ../database/migrations",
-    "migrate:down": "node-pg-migrate down -m ../database/migrations",
-    "migrate:create": "node-pg-migrate create -m ../database/migrations --"
+    "migrate:up": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate up -m ../database/migrations",
+    "migrate:down": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate down -m ../database/migrations",
+    "migrate:create": "node --env-file=.env ./node_modules/node-pg-migrate/bin/node-pg-migrate create -m ../database/migrations --"
   },
   "dependencies": {
     "express": "^4.19.2",

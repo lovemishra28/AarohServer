@@ -1,7 +1,9 @@
 import { type AuthContext } from '../../common/auth-middleware';
-import { withClient } from '../../common/db';
+import { withTransaction } from '../../common/db';
+import { logger } from '../../common/logger';
+import { resolveSyncDevice } from '../devices/devices.repo';
 import { getOwnedFieldOrThrow } from '../fields/fields.service';
-import type { CreateReadingBody } from './readings.dto';
+import type { BatchReadingsBody } from './readings.dto';
 import { type PublicReading, insertReading, listReadingsForField, toPublicReading } from './readings.repo';
 
 export interface IngestResult {
@@ -18,33 +20,50 @@ export interface IngestResult {
  */
 export async function createReadings(
   auth: AuthContext,
-  readings: CreateReadingBody[],
+  batch: BatchReadingsBody,
 ): Promise<IngestResult> {
+  const { readings, device_metadata } = batch;
+
   const fieldIds = new Set(readings.map((r) => r.field_id).filter((id): id is string => !!id));
   for (const fieldId of fieldIds) {
     await getOwnedFieldOrThrow(auth, fieldId);
   }
 
-  return withClient(async (client) => {
-    await client.query('BEGIN');
-    try {
-      const out: PublicReading[] = [];
-      let created = 0;
-      for (const r of readings) {
-        const { row, created: wasCreated } = await insertReading(r, client);
-        out.push(toPublicReading(row));
-        if (wasCreated) created += 1;
-      }
-      await client.query('COMMIT');
-      return {
-        readings: out,
-        created_count: created,
-        duplicate_count: readings.length - created,
-      };
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
+  return withTransaction(async (client) => {
+    // `probe_id` is a *serial* — the string on the stick's label — while
+    // `readings.device_id` is a uuid foreign key. Assigning one to the other used
+    // to happen here and made Postgres reject the whole batch with an invalid-uuid
+    // error, since a serial is not a uuid. Resolve it to a real device row instead,
+    // registering the stick on first sight, and only link readings to it when this
+    // farmer actually owns it.
+    let resolvedDeviceId: string | null = null;
+    if (device_metadata?.probe_id) {
+      const device = await resolveSyncDevice(
+        device_metadata.probe_id,
+        auth.farmerId,
+        device_metadata.firmware_version ?? null,
+        client,
+      );
+      if (device.owner_farmer_id === auth.farmerId) resolvedDeviceId = device.id;
+      else logger.warn('reading_device_owned_by_other', { serial: device_metadata.probe_id });
     }
+
+    const out: PublicReading[] = [];
+    let created = 0;
+    for (const r of readings) {
+      const { row, created: wasCreated } = await insertReading(
+        r.device_id ? r : { ...r, device_id: resolvedDeviceId ?? undefined },
+        client,
+      );
+      out.push(toPublicReading(row));
+      if (wasCreated) created += 1;
+    }
+
+    return {
+      readings: out,
+      created_count: created,
+      duplicate_count: readings.length - created,
+    };
   });
 }
 

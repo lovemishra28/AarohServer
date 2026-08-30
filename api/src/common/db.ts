@@ -66,6 +66,35 @@ export async function withClient<T>(fn: (client: PoolClient) => Promise<T>): Pro
 }
 
 /**
+ * Run a callback inside a transaction, committing on return and rolling back on
+ * throw.
+ *
+ * Worth a helper rather than hand-written BEGIN/COMMIT at each call site: a
+ * multi-step write that forgets its ROLLBACK does not just lose the rollback, it
+ * returns a client to the pool with an open transaction, and the next unrelated
+ * request inherits it. The ROLLBACK here is itself guarded — if the connection
+ * died mid-transaction the rollback will fail too, and that must not mask the
+ * error that actually caused the failure.
+ */
+export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  return withClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const result = await fn(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        logger.error('pg_rollback_failed', describeError(rollbackErr));
+      }
+      throw err;
+    }
+  });
+}
+
+/**
  * Close all pooled connections. Called on shutdown and in tests — an open pool
  * keeps the Node event loop alive and makes the process hang on exit.
  */

@@ -82,6 +82,17 @@ exports.up = (pgm) => {
     centroid: { type: 'geometry(Point,4326)' },
     area_ha: { type: 'numeric', check: 'area_ha IS NULL OR area_ha > 0' },
     region_code: { type: 'text', notNull: true, default: 'chambal' },
+    source: {
+      type: 'text',
+      notNull: true,
+      default: 'manual',
+      check: "source IN ('manual', 'auto')",
+      comment: "'auto' fields were inferred from a GPS cluster and may be re-derived; 'manual' boundaries are never overwritten.",
+    },
+    detected_at: {
+      type: 'timestamptz',
+      comment: 'When segregation first inferred this field. Null for manually created fields.',
+    },
     created_at: { type: 'timestamptz', notNull: true, default: pgm.func('now()') },
   });
   // GiST indexes for spatial queries (field clustering, containment).

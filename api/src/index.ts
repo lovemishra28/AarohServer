@@ -6,8 +6,9 @@ import { env } from './config/env';
 
 const app = createApp();
 
-const server = app.listen(env.PORT, () => {
+const server = app.listen(env.PORT, env.HOST, () => {
   logger.info('api_started', {
+    host: env.HOST,
     port: env.PORT,
     env: env.NODE_ENV,
     ai_service_url: env.AI_SERVICE_URL,

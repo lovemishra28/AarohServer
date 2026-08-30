@@ -235,6 +235,21 @@ cd ai  && pip install -e ".[dev]" && ruff check . && pytest
 CI (`.github/workflows/ci.yml`) runs all of the above on every pull request, plus a
 `migrate:up` against a throwaway PostGIS database.
 
+There is one further check that needs no database:
+
+```bash
+cd api && npm run verify:clustering
+```
+
+It runs the mock field survey (`../AAROH-Client/test-frames/10-survey-3-fields.txt`) through
+the shipped `dbscan.ts` at the shipped `segregation.config.ts` values and asserts the outcome:
+three clusters, no noise, thirty points each, centroids far outside the field-match radius. The
+unit tests cover the algorithm with their own fixtures; this covers the fixture the demo
+actually uses, so a dataset that would cluster into two fields is caught before anyone connects
+a phone. It also prints the per-field means the dashboard should display. The end-to-end
+procedure that consumes those numbers lives in the client repo, at
+`AAROH-Client/FIELD_SEGREGATION_TEST.md`.
+
 ## Using a cloud database instead of local Docker
 
 The database is referenced **only** through the `DATABASE_URL` connection string — never hardcoded.

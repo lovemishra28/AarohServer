@@ -53,6 +53,7 @@ loadDotEnv();
  */
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(3000),
   // Default targets the host-published database port (5433, not 5432 — see
   // docker-compose.yml). Inside compose this is overridden with db:5432.
