@@ -1,0 +1,81 @@
+{
+  "spec_version": "1.0.0",
+  "created_at": "2026-08-26T11:58:02.725548+00:00",
+  "raw_to_internal": {
+    "N": "n_mgkg",
+    "P": "p_mgkg",
+    "K": "k_mgkg",
+    "ph": "ph",
+    "ec": "ec_uscm",
+    "moisture": "moisture_vwc",
+    "temperature": "soil_temp_c",
+    "humidity": "humidity_pct",
+    "rainfall": "rainfall_mm",
+    "soil_type": "soil_type",
+    "season": "season"
+  },
+  "feature_order": [
+    "n_mgkg",
+    "p_mgkg",
+    "k_mgkg",
+    "ph",
+    "ec_uscm",
+    "moisture_vwc",
+    "soil_temp_c",
+    "humidity_pct",
+    "rainfall_mm",
+    "soil_type",
+    "season"
+  ],
+  "numeric_features": [
+    "n_mgkg",
+    "p_mgkg",
+    "k_mgkg",
+    "ph",
+    "ec_uscm",
+    "moisture_vwc",
+    "soil_temp_c",
+    "humidity_pct",
+    "rainfall_mm"
+  ],
+  "categorical_features": [
+    "soil_type",
+    "season"
+  ],
+  "optional_at_inference": [
+    "soil_temp_c"
+  ],
+  "categorical_categories": {
+    "soil_type": [
+      "Alluvial",
+      "Black",
+      "Clayey",
+      "Laterite",
+      "Red",
+      "Sandy"
+    ],
+    "season": [
+      "Kharif",
+      "Rabi",
+      "Zaid"
+    ]
+  },
+  "units": {
+    "n_mgkg": "mg/kg",
+    "p_mgkg": "mg/kg",
+    "k_mgkg": "mg/kg",
+    "ph": "pH",
+    "ec_uscm": "uS/cm",
+    "moisture_vwc": "%VWC",
+    "soil_temp_c": "degC",
+    "humidity_pct": "%RH",
+    "rainfall_mm": "mm/season",
+    "soil_type": "category",
+    "season": "category"
+  },
+  "source_hashes": {
+    "features": "3bb053a37f720744f38840667460a6bffc267a53bf43f0dcd42366cd40e5bc45",
+    "soft": "a7247bf19cc1b4516bf5a7384a5fbea6ead25e664cf156ffe0d2812f905c5aef"
+  },
+  "notes": "Ranker consumes sensor-native units; unit CONVERSION (mg/kg->kg/ha, P->P2O5, K->K2O, uS/cm->dS/m) is the agronomy engine's job (Phase 2), not this pipeline. soil_temp_c may be missing at inference (firmware gap) and is passed as NaN."
+}
