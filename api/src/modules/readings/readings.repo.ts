@@ -302,3 +302,50 @@ export async function findStoredIdempotencyKeys(
   return new Set(rows.map((r) => r.idempotency_key));
 }
 
+export interface HistoryReadingRow extends ReadingRow {
+  device_serial: string | null;
+  device_firmware_version: string | null;
+  session_id: string | null;
+}
+
+export interface HistoryReading extends PublicReading {
+  session_id: string | null;
+  device_serial: string | null;
+  device_firmware_version: string | null;
+}
+
+export function toHistoryReading(row: HistoryReadingRow): HistoryReading {
+  return {
+    ...toPublicReading(row),
+    session_id: row.session_id,
+    device_serial: row.device_serial,
+    device_firmware_version: row.device_firmware_version,
+  };
+}
+
+export async function listReadingsForFarmer(
+  farmerId: string,
+  limit = 200,
+  db: Queryable = getPool(),
+): Promise<HistoryReadingRow[]> {
+  const { rows } = await db.query<HistoryReadingRow>(
+    `SELECT 
+      r.id, r.device_id, r.field_id, r.taken_at,
+      ST_AsGeoJSON(r.location) AS location_geojson,
+      r.n_mgkg, r.p_mgkg, r.k_mgkg, r.ph, r.ec_uscm, r.moisture_vwc, r.soil_temp_c,
+      r.npk_is_calibrated, r.source, r.idempotency_key, r.raw_frame, r.created_at,
+      r.session_id,
+      d.serial AS device_serial,
+      d.firmware_version AS device_firmware_version
+     FROM readings r
+     LEFT JOIN devices d ON r.device_id = d.id
+     LEFT JOIN fields f ON r.field_id = f.id
+     WHERE f.farmer_id = $1 OR d.owner_farmer_id = $1
+     ORDER BY r.taken_at DESC
+     LIMIT $2`,
+    [farmerId, limit],
+  );
+  return rows;
+}
+
+

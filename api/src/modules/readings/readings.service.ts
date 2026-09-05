@@ -4,7 +4,15 @@ import { logger } from '../../common/logger';
 import { resolveSyncDevice } from '../devices/devices.repo';
 import { getOwnedFieldOrThrow } from '../fields/fields.service';
 import type { BatchReadingsBody } from './readings.dto';
-import { type PublicReading, insertReading, listReadingsForField, toPublicReading } from './readings.repo';
+import {
+  type PublicReading,
+  type HistoryReading,
+  insertReading,
+  listReadingsForField,
+  listReadingsForFarmer,
+  toPublicReading,
+  toHistoryReading,
+} from './readings.repo';
 
 export interface IngestResult {
   readings: PublicReading[];
@@ -76,4 +84,13 @@ export async function listReadings(
   await getOwnedFieldOrThrow(auth, fieldId);
   const rows = await listReadingsForField(fieldId, limit);
   return rows.map(toPublicReading);
+}
+
+/** GET /v1/readings/history — all readings for the authenticated farmer. */
+export async function listReadingsHistory(
+  auth: AuthContext,
+  limit = 200,
+): Promise<HistoryReading[]> {
+  const rows = await listReadingsForFarmer(auth.farmerId, limit);
+  return rows.map(toHistoryReading);
 }

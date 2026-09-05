@@ -4,7 +4,7 @@ import { asyncHandler, parseOrThrow } from '../../common/http';
 import { SyncBatchSchema, screenSyncBatch } from '../segregation/segregation.dto';
 import { emptySyncResult, syncProbeReadings } from '../segregation/segregation.service';
 import { BatchReadingsSchema, CreateReadingSchema, type BatchReadingsBody } from './readings.dto';
-import { createReadings } from './readings.service';
+import { createReadings, listReadingsHistory } from './readings.service';
 
 /**
  * Reading ingest (§6.2), mounted at /v1/readings.
@@ -25,6 +25,14 @@ import { createReadings } from './readings.service';
  */
 export const readingsRouter = Router();
 readingsRouter.use(authenticate);
+
+// GET /v1/readings/history — get the authenticated farmer's past scans.
+readingsRouter.get(
+  '/history',
+  asyncHandler(async (req, res) => {
+    res.json(await listReadingsHistory(requireAuth(req), 200));
+  }),
+);
 
 // POST /v1/readings — ingest one reading or a batch.
 readingsRouter.post(
