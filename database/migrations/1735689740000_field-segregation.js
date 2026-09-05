@@ -59,19 +59,8 @@ exports.up = (pgm) => {
   });
 
   // ── fields: how this field came to exist ───────────────────────────────────
-  pgm.addColumns('fields', {
-    source: {
-      type: 'text',
-      notNull: true,
-      default: 'manual',
-      check: "source IN ('manual', 'auto')",
-      comment: "'auto' fields were inferred from a GPS cluster and may be re-derived; 'manual' boundaries are never overwritten.",
-    },
-    detected_at: {
-      type: 'timestamptz',
-      comment: 'When segregation first inferred this field. Null for manually created fields.',
-    },
-  });
+  // ── fields: how this field came to exist ───────────────────────────────────
+  // (Removed duplicate addColumns for source and detected_at; these are now in core-schema)
 
   // ── field_aggregates: the field's aggregate latest reading ─────────────────
   pgm.createTable('field_aggregates', {
@@ -108,7 +97,7 @@ exports.up = (pgm) => {
  */
 exports.down = (pgm) => {
   pgm.dropTable('field_aggregates');
-  pgm.dropColumns('fields', ['source', 'detected_at']);
+  // (Removed dropColumns for source and detected_at; they belong to core-schema now)
   pgm.dropIndex('readings', ['session_id', 'taken_at'], { name: 'readings_session_taken_at' });
   pgm.dropIndex('readings', 'location', { name: 'readings_location_gist' });
   pgm.dropColumns('readings', ['session_id']);

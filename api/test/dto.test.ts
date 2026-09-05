@@ -159,7 +159,7 @@ describe('code schemas', () => {
 
   it('holds a reset to both a valid code and the password policy', () => {
     expect(
-      PasswordResetSchema.safeParse({ email: 'a@b.com', code: '123456', password: 'paddy2024' })
+      PasswordResetSchema.safeParse({ email: 'a@b.com', code: '123456', password: 'ValidPassword123!' })
         .success,
     ).toBe(true);
     expect(
