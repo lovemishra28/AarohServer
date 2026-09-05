@@ -39,6 +39,8 @@
  * @param {import('node-pg-migrate').MigrationBuilder} pgm
  */
 exports.up = (pgm) => {
+  pgm.sql('SET search_path TO "$user", public, extensions;');
+
   // ── readings: which walk a point came from, and a usable spatial index ──────
   pgm.addColumns('readings', {
     session_id: {

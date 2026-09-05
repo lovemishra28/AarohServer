@@ -22,6 +22,8 @@
  * @param {import('node-pg-migrate').MigrationBuilder} pgm
  */
 exports.up = (pgm) => {
+  pgm.sql('SET search_path TO "$user", public, extensions;');
+
   // ── farmers ────────────────────────────────────────────────────────────────
   // The identity table. Farmers authenticate by phone + OTP; agents/admins also
   // carry a password_hash (§6.1). `role` gates RBAC.
