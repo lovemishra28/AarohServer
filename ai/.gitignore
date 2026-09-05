@@ -10,8 +10,7 @@ __pycache__/
 # Trained model binaries are large and reproducible from a registered run —
 # the registry.json (which records dataset_hash + metrics + artifact path) is
 # the source of truth and IS committed. Keep the folder, ignore its contents.
-models/artifacts/*
-!models/artifacts/.gitkeep
+
 
 # Derived data zones — regenerated from datasets/raw, never hand-edited.
 datasets/interim/*
